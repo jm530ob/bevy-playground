@@ -13,5 +13,5 @@ opt-level = 3
 lto = true
 
 [dependencies]
-bevy = { version = "0.15.1", features = ["wayland"] }
+bevy = { version = "0.15.1", features = ["dynamic_linking", "wayland"] }
 rand = "0.8.5"
