@@ -1,114 +1,93 @@
-use bevy::{input::keyboard::KeyboardInput, prelude::*, state::commands, window::PrimaryWindow};
+use std::time::Duration;
+
+use bevy::{
+    color::palettes::css::DARK_GREEN,
+    input::keyboard::KeyboardInput,
+    prelude::*,
+    state::commands,
+    window::{PrimaryWindow, WindowMode},
+};
+use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
+
+const GIRL_PATH: &str = "models/girl.glb";
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
-        .add_systems(Startup, spawn_player)
-        .add_systems(Update, movement)
-        //.add_systems(Startup, spawn_cubes)
-        //.add_plugins(HelloPlugin)
+        .add_plugins(PanOrbitCameraPlugin)
+        .add_systems(Startup, setup)
+        .add_systems(Update, robot_animation)
         .run();
 }
 
-pub fn spawn_player(
+pub fn setup(
     mut commands: Commands,
-    window: Query<&Window, With<PrimaryWindow>>,
+    mut windows: Query<&mut Window, With<PrimaryWindow>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut graphs: ResMut<Assets<AnimationGraph>>,
     asset_server: Res<AssetServer>,
 ) {
-    let window = window.get_single().unwrap();
-    commands.spawn(Camera2d);
-    commands.spawn((
-        Sprite {
-            image: asset_server.load("sprites/sonic.png"),
-            ..default()
-        },
-        Transform::from_xyz(0.0, 0.0, 0.0).with_scale(Vec3::splat(0.2)),
-    ));
-}
-
-pub fn movement(
-    time: Res<Time>,
-    keys: Res<ButtonInput<KeyCode>>,
-    mut transform: Query<&mut Transform, With<Sprite>>,
-) {
-    const VELOCITY: f32 = 500.0;
-    let Ok(mut transform_obj) = transform.get_single_mut() else {
+    let Ok(mut window) = windows.get_single_mut() else {
         return;
     };
+    let (graph, node_indices) = AnimationGraph::from_clips([
+        asset_server.load(GltfAssetLabel::Animation(0).from_asset(GIRL_PATH)),
+        asset_server.load(GltfAssetLabel::Animation(1).from_asset(GIRL_PATH)),
+        asset_server.load(GltfAssetLabel::Animation(2).from_asset(GIRL_PATH)),
+    ]);
 
-    let mut direction = Vec3::ZERO;
-    let translation = &mut transform_obj.translation;
+    let graph_handle = graphs.add(graph);
+    commands.insert_resource(Animations {
+        animations: node_indices,
+        graph: graph_handle,
+    });
 
-    match keys.get_pressed().next() {
-        Some(KeyCode::KeyA) => {
-            direction.x -= 1.0;
-        }
-        Some(KeyCode::KeyW) => {}
-        Some(KeyCode::KeyS) => {}
-        Some(KeyCode::KeyD) => {
-            direction.x += 1.0;
-        }
-        _ => {}
-    }
+    //commands.insert_resource(Animations(vec![
+    //    asset_server.load(GltfAssetLabel::Animation(0).from_asset("models/robot.glb"))
+    //]));
+    // window.mode = WindowMode::Fullscreen(MonitorSelection::Current);
+    commands.spawn((
+        SceneRoot(asset_server.load(GltfAssetLabel::Scene(0).from_asset(GIRL_PATH))),
+        Transform::from_xyz(1.0, 1.0, 3.0),
+    ));
 
-    *translation += direction * VELOCITY * time.delta_secs();
+    commands.spawn((
+        Mesh3d(meshes.add(Plane3d::default().mesh().size(20., 20.))),
+        MeshMaterial3d(materials.add(Color::from(DARK_GREEN))),
+    ));
 
-    // if keys.just_pressed(KeyCode::KeyA) {
-    //     println!("Yahooo");
-    // }
-
-    //match eve
-}
-
-pub fn setup_camera(mut commands: Commands) {
-    commands.spawn(Camera3d::default());
-}
-
-pub fn spawn_cubes(
-    mut command: Commands,
-    mut mesh: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
-) {
-    command.spawn(Camera2d);
-    //command.spawn(SpriteBundle {});
-    command.spawn((
-        Mesh2d(mesh.add(Rectangle::new(50.0, 100.0))),
-        MeshMaterial2d(materials.add(Color::hsl(360. * 1 as f32 / 1 as f32, 0.95, 0.7))),
-        Transform::from_xyz(100.0, 0.0, 1.0),
+    commands.spawn((
+        Transform::from_translation(Vec3::new(0.0, 1.5, 5.0)),
+        PanOrbitCamera::default(),
     ));
 }
 
-pub struct HelloPlugin;
+pub fn robot_animation(
+    mut commands: Commands,
+    animations: Res<Animations>,
+    mut players: Query<(Entity, &mut AnimationPlayer), Added<AnimationPlayer>>,
+) {
+    for (entity, mut player) in &mut players {
+        let mut transitions = AnimationTransitions::new();
 
-impl Plugin for HelloPlugin {
-    fn build(&self, app: &mut App) {
-        app.insert_resource(GreetTimer(Timer::from_seconds(2.0, TimerMode::Repeating)));
-        app.add_systems(Startup, setup);
-        app.add_systems(Update, print_names);
+        // Make sure to start the animation via the `AnimationTransitions`
+        // component. The `AnimationTransitions` component wants to manage all
+        // the animations and will get confused if the animations are started
+        // directly via the `AnimationPlayer`.
+        transitions
+            .play(&mut player, animations.animations[0], Duration::ZERO)
+            .repeat();
+
+        commands
+            .entity(entity)
+            .insert(AnimationGraphHandle(animations.graph.clone()))
+            .insert(transitions);
     }
 }
+
 #[derive(Resource)]
-pub struct GreetTimer(Timer);
-
-pub fn setup(mut commands: Commands) {
-    commands.spawn(Person {
-        name: "Jakub".to_string(),
-    });
-}
-
-pub fn print_names(time: Res<Time>, mut timer: ResMut<GreetTimer>, persons_query: Query<&Person>) {
-    if timer.0.tick(time.delta()).just_finished() {
-        for person in persons_query.iter() {
-            println!("{}", person.name);
-        }
-    }
-}
-
-#[derive(Component)]
-pub struct Person {
-    name: String,
-}
-
-pub fn hello() {
-    println!("Hello");
+pub struct Animations {
+    animations: Vec<AnimationNodeIndex>,
+    graph: Handle<AnimationGraph>,
 }
