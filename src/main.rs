@@ -1,15 +1,30 @@
 use std::time::Duration;
 
 use bevy::{
-    color::palettes::css::DARK_GREEN,
-    input::keyboard::KeyboardInput,
+    color::palettes::css::{DARK_GREEN, RED},
     prelude::*,
-    state::commands,
-    window::{PrimaryWindow, WindowMode},
+    sprite::Anchor,
+    window::PrimaryWindow,
 };
+
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
 
 const GIRL_PATH: &str = "models/girl.glb";
+
+#[derive(Component)]
+pub struct Movable {
+    accumulation: Vec3,
+    speed: f32,
+}
+
+impl Movable {
+    fn new(accumulation: Vec3) -> Self {
+        Movable {
+            accumulation,
+            speed: 4.0,
+        }
+    }
+}
 
 fn main() {
     App::new()
@@ -17,6 +32,7 @@ fn main() {
         .add_plugins(PanOrbitCameraPlugin)
         .add_systems(Startup, setup)
         .add_systems(Update, robot_animation)
+        .add_systems(Update, move_model)
         .run();
 }
 
@@ -28,13 +44,21 @@ pub fn setup(
     mut graphs: ResMut<Assets<AnimationGraph>>,
     asset_server: Res<AssetServer>,
 ) {
-    let Ok(mut window) = windows.get_single_mut() else {
-        return;
-    };
+    commands.spawn((
+        Text::new("Fps: "),
+        Node {
+            position_type: PositionType::Absolute,
+            top: Val::Px(12.0),
+            left: Val::Px(12.0),
+            ..default()
+        },
+    ));
+
     let (graph, node_indices) = AnimationGraph::from_clips([
         asset_server.load(GltfAssetLabel::Animation(0).from_asset(GIRL_PATH)),
         asset_server.load(GltfAssetLabel::Animation(1).from_asset(GIRL_PATH)),
         asset_server.load(GltfAssetLabel::Animation(2).from_asset(GIRL_PATH)),
+        asset_server.load(GltfAssetLabel::Animation(3).from_asset(GIRL_PATH)),
     ]);
 
     let graph_handle = graphs.add(graph);
@@ -43,13 +67,18 @@ pub fn setup(
         graph: graph_handle,
     });
 
-    //commands.insert_resource(Animations(vec![
-    //    asset_server.load(GltfAssetLabel::Animation(0).from_asset("models/robot.glb"))
-    //]));
-    // window.mode = WindowMode::Fullscreen(MonitorSelection::Current);
+    commands
+        .spawn(PointLight {
+            shadows_enabled: true,
+            ..default()
+        })
+        .insert(Transform::from_xyz(0.0, 10.0, 0.0));
+
+    // Model - girl
     commands.spawn((
         SceneRoot(asset_server.load(GltfAssetLabel::Scene(0).from_asset(GIRL_PATH))),
-        Transform::from_xyz(1.0, 1.0, 3.0),
+        Transform::from_xyz(1.0, 0.0, 3.0),
+        Movable::new(Vec3::ZERO),
     ));
 
     commands.spawn((
@@ -76,13 +105,40 @@ pub fn robot_animation(
         // the animations and will get confused if the animations are started
         // directly via the `AnimationPlayer`.
         transitions
-            .play(&mut player, animations.animations[0], Duration::ZERO)
+            .play(&mut player, animations.animations[1], Duration::ZERO)
             .repeat();
 
         commands
             .entity(entity)
             .insert(AnimationGraphHandle(animations.graph.clone()))
             .insert(transitions);
+    }
+}
+
+pub fn move_model(
+    mut model_q: Query<(&mut Transform, &mut Movable)>,
+    time: Res<Time>,
+    keys: Res<ButtonInput<KeyCode>>,
+) {
+    for (mut transform, mut movable) in model_q.iter_mut() {
+        if keys.pressed(KeyCode::KeyW) {
+            movable.accumulation.z -= 1.0;
+        }
+        if keys.pressed(KeyCode::KeyS) {
+            movable.accumulation.z += 1.0;
+        }
+        if keys.pressed(KeyCode::KeyA) {
+            movable.accumulation.x -= 1.0;
+        }
+        if keys.pressed(KeyCode::KeyD) {
+            movable.accumulation.x += 1.0;
+        }
+
+        transform.translation +=
+            movable.speed * time.delta_secs() * movable.accumulation.normalize_or_zero();
+
+        movable.accumulation.z = 0.;
+        movable.accumulation.x = 0.;
     }
 }
 
