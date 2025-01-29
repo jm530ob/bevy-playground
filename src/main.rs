@@ -1,7 +1,10 @@
-use std::time::Duration;
+use std::{f32::consts::PI, time::Duration};
 
 use bevy::{
-    color::palettes::css::{DARK_GREEN, RED},
+    color::palettes::{
+        css::{DARK_GREEN, PURPLE, RED},
+        tailwind::RED_500,
+    },
     prelude::*,
     sprite::Anchor,
     window::PrimaryWindow,
@@ -10,6 +13,9 @@ use bevy::{
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
 
 const GIRL_PATH: &str = "models/girl.glb";
+
+#[derive(Component)]
+pub struct FacingDir(Vec3);
 
 #[derive(Component)]
 pub struct Movable {
@@ -47,6 +53,7 @@ pub fn setup(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut graphs: ResMut<Assets<AnimationGraph>>,
     asset_server: Res<AssetServer>,
+    time: Res<Time>,
 ) {
     commands.spawn((
         Text::new("Fps: "),
@@ -82,15 +89,18 @@ pub fn setup(
     commands.spawn((
         SceneRoot(asset_server.load(GltfAssetLabel::Scene(0).from_asset(GIRL_PATH))),
         Transform::from_xyz(1.0, 0.0, 3.0),
+        FacingDir(Vec3::ZERO),
         Movable::new(Vec3::ZERO),
     ));
 
+    // Plane
     commands.spawn((
         Mesh3d(meshes.add(Plane3d::default().mesh().size(20., 20.))),
         MeshMaterial3d(materials.add(Color::from(DARK_GREEN))),
         Ground,
     ));
 
+    // Camera
     commands.spawn((
         Transform::from_translation(Vec3::new(0.0, 1.5, 5.0)),
         PanOrbitCamera::default(),
@@ -101,6 +111,7 @@ fn draw_cursor(
     camera_query: Single<(&Camera, &GlobalTransform)>,
     ground: Single<&GlobalTransform, With<Ground>>,
     windows: Single<&Window>,
+    facing: Single<&mut FacingDir>,
     mut gizmos: Gizmos,
 ) {
     let (camera, camera_transform) = *camera_query;
@@ -120,13 +131,17 @@ fn draw_cursor(
     else {
         return;
     };
+
     let point = ray.get_point(distance);
+
+    let mut dir = facing.into_inner();
+    dir.0 = point;
 
     // Draw a circle just above the ground plane at that position.
     gizmos.circle(
         Isometry3d::new(
             point + ground.up() * 0.01,
-            Quat::from_rotation_arc(Vec3::Z, ground.up().as_vec3()),
+            Quat::from_rotation_arc(Vec3::Z, Vec3::Y),
         ),
         0.2,
         Color::WHITE,
@@ -160,6 +175,7 @@ pub fn move_model(
     mut model_q: Query<(&mut Transform, &mut Movable)>,
     time: Res<Time>,
     keys: Res<ButtonInput<KeyCode>>,
+    facing: Single<&mut FacingDir>,
 ) {
     for (mut transform, mut movable) in model_q.iter_mut() {
         if keys.pressed(KeyCode::KeyW) {
@@ -174,6 +190,9 @@ pub fn move_model(
         if keys.pressed(KeyCode::KeyD) {
             movable.accumulation.x += 1.0;
         }
+
+        *transform = transform.looking_at(facing.0, Vec3::Y)
+            * Transform::from_rotation(Quat::from_rotation_y(PI));
 
         transform.translation +=
             movable.speed * time.delta_secs() * movable.accumulation.normalize_or_zero();
