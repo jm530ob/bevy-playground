@@ -1,11 +1,12 @@
+use light_consts::lux::{FULL_DAYLIGHT, OVERCAST_DAY};
+use noise::{BasicMulti, NoiseFn, Perlin, Seedable};
 use std::{f32::consts::PI, time::Duration};
 
 use bevy::{
-    color::palettes::{
-        css::{DARK_GREEN, PURPLE, RED},
-        tailwind::RED_500,
-    },
+    color::palettes::{css::WHITE, tailwind::*},
+    input::keyboard::KeyboardInput,
     prelude::*,
+    render::mesh::VertexAttributeValues,
     sprite::Anchor,
     window::PrimaryWindow,
 };
@@ -14,13 +15,11 @@ use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
 
 const GIRL_PATH: &str = "models/girl.glb";
 
-#[derive(Component)]
-pub struct FacingDir(Vec3);
-
-#[derive(Component)]
+#[derive(Component, Debug)]
 pub struct Movable {
     accumulation: Vec3,
     speed: f32,
+    target_position: Vec3,
 }
 
 impl Movable {
@@ -28,6 +27,7 @@ impl Movable {
         Movable {
             accumulation,
             speed: 4.0,
+            target_position: Vec3::ZERO,
         }
     }
 }
@@ -79,24 +79,65 @@ pub fn setup(
     });
 
     commands
-        .spawn(PointLight {
+        .spawn(DirectionalLight {
+            illuminance: OVERCAST_DAY,
             shadows_enabled: true,
+
             ..default()
         })
-        .insert(Transform::from_xyz(0.0, 10.0, 0.0));
+        .insert(Transform {
+            translation: Vec3::new(0., 2., 0.),
+            rotation: Quat::from_rotation_x(-PI / 4.),
+            ..default()
+        });
 
     // Model - girl
     commands.spawn((
         SceneRoot(asset_server.load(GltfAssetLabel::Scene(0).from_asset(GIRL_PATH))),
         Transform::from_xyz(1.0, 0.0, 3.0),
-        FacingDir(Vec3::ZERO),
         Movable::new(Vec3::ZERO),
     ));
 
+    let mut terrain = Mesh::from(
+        Plane3d::default()
+            .mesh()
+            .size(1000., 1000.)
+            .subdivisions(200),
+    );
+
+    let terrain_height = 20.;
+    if let Some(VertexAttributeValues::Float32x3(positions)) =
+        terrain.attribute_mut(Mesh::ATTRIBUTE_POSITION)
+    {
+        //dbg!(positions);
+
+        let noise = BasicMulti::<Perlin>::default();
+        for pos in positions.iter_mut() {
+            let val = noise.get([pos[0] as f64 / 300., pos[2] as f64 / 300.]);
+            pos[1] = val as f32 * terrain_height;
+        }
+
+        let colors: Vec<[f32; 4]> = positions
+            .iter()
+            .map(|[_, y, _]| {
+                let y = *y / terrain_height;
+                //dbg!(y);
+                if y > 0. {
+                    Color::from(GRAY_700).to_linear().to_f32_array()
+                } else {
+                    Color::from(GREEN_900).to_linear().to_f32_array()
+                }
+            })
+            .collect();
+        terrain.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
+    }
+
+    terrain.compute_normals();
+
     // Plane
     commands.spawn((
-        Mesh3d(meshes.add(Plane3d::default().mesh().size(20., 20.))),
-        MeshMaterial3d(materials.add(Color::from(DARK_GREEN))),
+        Mesh3d(meshes.add(terrain)),
+        MeshMaterial3d(materials.add(Color::from(WHITE))),
         Ground,
     ));
 
@@ -111,7 +152,8 @@ fn draw_cursor(
     camera_query: Single<(&Camera, &GlobalTransform)>,
     ground: Single<&GlobalTransform, With<Ground>>,
     windows: Single<&Window>,
-    facing: Single<&mut FacingDir>,
+    mouse_keys: Res<ButtonInput<MouseButton>>,
+    mut movable: Single<&mut Movable>,
     mut gizmos: Gizmos,
 ) {
     let (camera, camera_transform) = *camera_query;
@@ -134,8 +176,12 @@ fn draw_cursor(
 
     let point = ray.get_point(distance);
 
-    let mut dir = facing.into_inner();
-    dir.0 = point;
+    //if let Some(target) = movable.target_position.as_mut() {
+
+    let target = movable.target_position.as_mut();
+    if mouse_keys.just_pressed(MouseButton::Right) {
+        *target = point.into();
+    }
 
     // Draw a circle just above the ground plane at that position.
     gizmos.circle(
@@ -175,7 +221,7 @@ pub fn move_model(
     mut model_q: Query<(&mut Transform, &mut Movable)>,
     time: Res<Time>,
     keys: Res<ButtonInput<KeyCode>>,
-    facing: Single<&mut FacingDir>,
+    mouse_keys: Res<ButtonInput<MouseButton>>,
 ) {
     for (mut transform, mut movable) in model_q.iter_mut() {
         if keys.pressed(KeyCode::KeyW) {
@@ -191,14 +237,23 @@ pub fn move_model(
             movable.accumulation.x += 1.0;
         }
 
-        *transform = transform.looking_at(facing.0, Vec3::Y)
-            * Transform::from_rotation(Quat::from_rotation_y(PI));
+        if mouse_keys.pressed(MouseButton::Right) {
+            *transform = transform.looking_at(movable.target_position, Vec3::Y)
+                * Transform::from_rotation(Quat::from_rotation_y(PI));
+        }
+        transform.translation = transform
+            .translation
+            .move_towards(movable.target_position, 0.1);
 
-        transform.translation +=
-            movable.speed * time.delta_secs() * movable.accumulation.normalize_or_zero();
+        // if transform.translation == facing.0 {
+        //     movable.is_moving = false;
+        // }
 
-        movable.accumulation.z = 0.;
-        movable.accumulation.x = 0.;
+        //        transform.translation +=
+        //            movable.speed * time.delta_secs() * movable.accumulation.normalize_or_zero();
+
+        //        movable.accumulation.z = 0.;
+        //        movable.accumulation.x = 0.;
     }
 }
 

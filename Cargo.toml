@@ -15,5 +15,6 @@ lto = true
 [dependencies]
 bevy = { version = "0.15.1", features = ["dynamic_linking", "wayland"] }
 bevy_panorbit_camera = "0.22.0"
+noise = "0.9.0"
 rand = "0.8.5"
 
