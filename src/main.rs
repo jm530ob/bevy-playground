@@ -3,7 +3,10 @@ use noise::{BasicMulti, NoiseFn, Perlin, Seedable};
 use std::{f32::consts::PI, time::Duration};
 
 use bevy::{
-    color::palettes::{css::WHITE, tailwind::*},
+    color::palettes::{
+        css::{SANDY_BROWN, WHITE},
+        tailwind::*,
+    },
     input::keyboard::KeyboardInput,
     prelude::*,
     render::mesh::VertexAttributeValues,
@@ -98,23 +101,26 @@ pub fn setup(
         Movable::new(Vec3::ZERO),
     ));
 
-    let mut terrain = Mesh::from(
-        Plane3d::default()
-            .mesh()
-            .size(1000., 1000.)
-            .subdivisions(200),
-    );
+    let mut terrain = Mesh::from(Plane3d::default().mesh().size(500., 500.).subdivisions(500));
 
-    let terrain_height = 20.;
+    let terrain_height = 30.;
+    let water_level = -0.3;
+    let zoom = 400.;
     if let Some(VertexAttributeValues::Float32x3(positions)) =
         terrain.attribute_mut(Mesh::ATTRIBUTE_POSITION)
     {
         //dbg!(positions);
 
-        let noise = BasicMulti::<Perlin>::default();
+        let mut noise = BasicMulti::<Perlin>::new(10);
+        noise.octaves = 6 as usize;
+
         for pos in positions.iter_mut() {
-            let val = noise.get([pos[0] as f64 / 300., pos[2] as f64 / 300.]);
+            let val = noise.get([pos[0] as f64 / zoom, pos[2] as f64 / zoom]);
             pos[1] = val as f32 * terrain_height;
+
+            if pos[1] / terrain_height < water_level {
+                pos[1] = water_level * terrain_height;
+            }
         }
 
         let colors: Vec<[f32; 4]> = positions
@@ -122,10 +128,12 @@ pub fn setup(
             .map(|[_, y, _]| {
                 let y = *y / terrain_height;
                 //dbg!(y);
-                if y > 0. {
-                    Color::from(GRAY_700).to_linear().to_f32_array()
+                if y > 0.3 {
+                    Color::from(SANDY_BROWN).to_linear().to_f32_array()
+                } else if y <= water_level {
+                    Color::from(BLUE_300).to_linear().to_f32_array()
                 } else {
-                    Color::from(GREEN_900).to_linear().to_f32_array()
+                    Color::from(GREEN_800).to_linear().to_f32_array()
                 }
             })
             .collect();
