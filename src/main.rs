@@ -3,13 +3,15 @@ use noise::{BasicMulti, NoiseFn, Perlin, Seedable};
 use std::{f32::consts::PI, time::Duration};
 
 use bevy::{
+    asset::RenderAssetUsages,
     color::palettes::{
         css::{SANDY_BROWN, WHITE},
         tailwind::*,
     },
     input::keyboard::KeyboardInput,
+    math::u32,
     prelude::*,
-    render::mesh::VertexAttributeValues,
+    render::mesh::{Indices, PrimitiveTopology, VertexAttributeValues},
     sprite::Anchor,
     window::PrimaryWindow,
 };
@@ -106,6 +108,9 @@ pub fn setup(
     let terrain_height = 30.;
     let water_level = -0.3;
     let zoom = 400.;
+    let mut water_indices: Vec<[f32; 3]> = vec![];
+    let mut indices: Vec<u32> = vec![];
+    let mut mul: u32 = 0;
     if let Some(VertexAttributeValues::Float32x3(positions)) =
         terrain.attribute_mut(Mesh::ATTRIBUTE_POSITION)
     {
@@ -113,15 +118,28 @@ pub fn setup(
 
         let mut noise = BasicMulti::<Perlin>::new(10);
         noise.octaves = 6 as usize;
+        let mut dbg_i = 0;
 
-        for pos in positions.iter_mut() {
+        for (i, pos) in positions.iter_mut().enumerate() {
+            dbg_i += 1;
+            if i as u32 % 3 == 0 {
+                mul += 3;
+            }
             let val = noise.get([pos[0] as f64 / zoom, pos[2] as f64 / zoom]);
             pos[1] = val as f32 * terrain_height;
 
             if pos[1] / terrain_height < water_level {
-                pos[1] = water_level * terrain_height;
+                water_indices.push([pos[0], pos[1] * terrain_height, pos[2]]);
+                // pos[1] = water_level * terrain_height;
+                indices.extend_from_slice(&[
+                    mul,
+                    mul + 2,
+                    mul + 1, // Trojuholník medzi suchom a vodou
+                ]);
             }
         }
+        dbg!(water_indices.len() * 3);
+        dbg!(indices.len());
 
         let colors: Vec<[f32; 4]> = positions
             .iter()
@@ -147,6 +165,25 @@ pub fn setup(
         Mesh3d(meshes.add(terrain)),
         MeshMaterial3d(materials.add(Color::from(WHITE))),
         Ground,
+    ));
+
+    let mut water = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+    )
+    .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, water_indices)
+    // .with_inserted_attribute(
+    //     Mesh::ATTRIBUTE_NORMAL,
+    //     vec![[0.0, 1.0, 0.0], [0.0, 1.0, 0.0], [0.0, 1.0, 0.0]],
+    // )
+    .with_inserted_indices(Indices::U32(indices));
+
+    water.duplicate_vertices();
+    water.compute_flat_normals();
+
+    commands.spawn((
+        Mesh3d(meshes.add(water)),
+        MeshMaterial3d(materials.add(Color::from(RED_200))),
     ));
 
     // Camera
